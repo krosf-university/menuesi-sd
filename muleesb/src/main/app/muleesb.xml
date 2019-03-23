@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:twitter="http://www.mulesoft.org/schema/mule/twitter" xmlns:email="http://www.mulesoft.org/schema/mule/email" xmlns:smtps="http://www.mulesoft.org/schema/mule/smtps" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:smtp="http://www.mulesoft.org/schema/mule/smtp" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/smtp http://www.mulesoft.org/schema/mule/smtp/current/mule-smtp.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/smtps http://www.mulesoft.org/schema/mule/smtps/current/mule-smtps.xsd
+http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd
+http://www.mulesoft.org/schema/mule/twitter http://www.mulesoft.org/schema/mule/twitter/current/mule-twitter.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
+    <http:request-config name="thingspeak" host="api.thingspeak.com" port="80" doc:name="HTTP Request Configuration"/>
+    <smtp:gmail-connector name="Gmail" contentType="text/plain" fromAddress="${email}" subject="Mule ESB" validateConnections="true" doc:name="Gmail"/>
+    <email:string-to-email-transformer mimeType="text/plain" name="String_to_Email" doc:name="String to Email"/>
+    <twitter:config name="Twitter__Configuration" accessKey="${accessKey}" accessSecret="${accessSecret}" consumerKey="${consumerKey}" consumerSecret="${consumerSecret}" doc:name="Twitter: Configuration"/>
+    <flow name="muleesbFlow" initialState="started">
+        <poll doc:name="Poll">
+            <fixed-frequency-scheduler frequency="30" timeUnit="SECONDS"/>
+            <http:request config-ref="thingspeak" path="/channels/9/feed.json" method="GET" doc:name="thingspeak" metadata:id="f5c96cba-0dfc-4aaa-b829-e12d7ef48cf5"/>
+        </poll>
+        <dw:transform-message doc:name="Transform Message" metadata:id="d5302d38-1f5f-4d22-b78f-c88a7839d795">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+"Lugar: " ++ payload.channel.name ++
+"\nsensor: " ++ payload.channel.description ++
+"\nlatitud: " ++ payload.channel.latitude ++
+"\nlongitud: " ++ payload.channel.longitude ++
+"\ntiempoRegistro: " ++ payload.channel.updated_at ++
+"\nluz: " ++ payload.channel.field1 ++
+"\ntemperaturaExt: " ++ payload.feeds.field1[0]]]></dw:set-payload>
+        </dw:transform-message>
+        <scatter-gather doc:name="Scatter-Gather">
+            <smtps:outbound-endpoint host="${host}" port="${port}" user="${email}" password="${gpass}" to="car.sanabriaflores@alum.uca.es" from="${email}" subject="Mule ESB" responseTimeout="10000" mimeType="text/plain" doc:name="SMTP" metadata:id="1bf4055d-8c33-4984-aca0-83e0436d67e5"/>
+            <twitter:update-status config-ref="Twitter__Configuration" status="#[payload]" doc:name="Twitter"/>
+        </scatter-gather>
+    </flow>
+</mule>

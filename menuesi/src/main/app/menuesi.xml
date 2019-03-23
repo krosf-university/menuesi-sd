@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:s3="http://www.mulesoft.org/schema/mule/s3" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:mongo="http://www.mulesoft.org/schema/mule/mongo" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/mongo http://www.mulesoft.org/schema/mule/mongo/current/mule-mongo.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/s3 http://www.mulesoft.org/schema/mule/s3/current/mule-s3.xsd">
+    <mongo:config-connection-string name="Mongo_DB__Connection_String" connectionString="${mongodburi}" doc:name="Mongo DB: Connection String"/>
+    <http:listener-config name="HTTP_Listener_Configuration" host="0.0.0.0" port="${http.port}"  doc:name="HTTP Listener Configuration"/>
+    <s3:config name="Amazon_S3__Configuration" accessKey="${s3.accesskey}" secretKey="${s3.secretkey}" doc:name="Amazon S3: Configuration"/>
+    <flow name="menuesiFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="subscribe" allowedMethods="POST" doc:name="/subscribe" metadata:id="2b70f6ba-7e5a-43d2-a46e-910c86877c1c"/>
+        <dw:transform-message doc:name="usuario" metadata:id="09a6a41c-76da-4e29-bb3b-8935335d48b1">
+            <dw:input-payload doc:sample="sample_data/json.json" mimeType="application/json"/>
+            <dw:input-variable mimeType="application/json" variableName="user"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+{
+	"id": payload.id
+}]]></dw:set-payload>
+            <dw:set-variable variableName="inputdata"><![CDATA[%dw 1.0
+%output application/java
+---
+payload]]></dw:set-variable>
+        </dw:transform-message>
+        <mongo:find-one-document config-ref="Mongo_DB__Connection_String" collection="users" doc:name="esta registado" failOnNotFound="false">
+        </mongo:find-one-document>
+        <logger message="ES ESTO: #[payload]" level="INFO" doc:name="Logger"/>
+        <choice doc:name="no">
+            <when expression="#[payload == null]">
+                <mongo:save-document config-ref="Mongo_DB__Connection_String" collection="users" document-ref="#[flowVars.inputdata]" doc:name="se a&#241;ade a la bd"/>
+                <dw:transform-message doc:name="Transform Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+    "campus": flowVars.inputdata.campus,
+    "chatid": flowVars.inputdata.chatid,
+    "new": true,
+    "username": flowVars.inputdata.username
+}]]></dw:set-payload>
+                </dw:transform-message>
+            </when>
+            <otherwise>
+                <dw:transform-message doc:name="Transform Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+    "campus": payload.campus,
+    "chatid": payload.chatid,
+    "new": false,
+    "username": payload.username
+}]]></dw:set-payload>
+                </dw:transform-message>
+            </otherwise>
+        </choice>
+    </flow>
+    <flow name="menuesiFlow1">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="image" allowedMethods="POST" doc:name="HTTP" metadata:id="bd2bf810-59e4-4e9b-9fa0-ebbcc55ade8f"/>
+        <dw:transform-message doc:name="Transform Message" metadata:id="5d522882-cdd5-4cb4-914f-35570e8dffd4">
+            <dw:input-payload doc:sample="sample_data/json_2.json"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+{
+	"date": payload.date,
+	"campus": payload.campus
+}]]></dw:set-payload>
+            <dw:set-variable variableName="filename"><![CDATA[%dw 1.0
+%output application/java
+%var file = payload.url
+---
+payload.date ++ file replace /.*(\/)/ with '']]></dw:set-variable>
+            <dw:set-variable variableName="origin"><![CDATA[%dw 1.0
+%output application/java
+---
+payload]]></dw:set-variable>
+        </dw:transform-message>
+        <mongo:find-one-document config-ref="Mongo_DB__Connection_String" collection="images" returnId="false" failOnNotFound="false" doc:name="Mongo DB"/>
+        <logger message="#[payload] es instancia #[payload is org.mule.transport.NullPayload] #[payload == null] #[payload == &quot;null&quot;] #[payload == NullPayload]" level="INFO" doc:name="Logger"/>
+        <choice doc:name="Choice">
+            <when expression="#[payload == null]">
+                <set-payload value="#[flowVars.origin.url]" doc:name="Set Payload"/>
+                <custom-transformer returnClass="java.io.File" class="menuesi.DownloadFile" doc:name="Java"/>
+                <s3:create-object config-ref="Amazon_S3__Configuration" bucketName="menuesi" key="#[flowVars.filename]" doc:name="Amazon S3"/>
+                <logger message="#[payload.toString()] #[flowVars.origin]" level="INFO" doc:name="Logger"/>
+                <dw:transform-message doc:name="Transform Message" metadata:id="089d641c-7fb7-4f81-a37e-04a8bf45daa9">
+                    <dw:input-variable doc:sample="sample_data/string.dwl" mimeType="application/java" variableName="filename"/>
+                    <dw:input-variable doc:sample="sample_data/json_1.json" variableName="origin"/>
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+{
+"chatid": flowVars.origin.chatid,
+"id": flowVars.origin.id,
+"url": "https://s3-eu-west-1.amazonaws.com/menuesi/" ++ flowVars.filename,
+"campus": flowVars.origin.campus,
+"date": flowVars.origin.date
+}]]></dw:set-payload>
+                    <dw:set-variable variableName="notifies"><![CDATA[%dw 1.0
+%output application/java
+---
+{
+	"campus": flowVars.origin.campus
+}]]></dw:set-variable>
+                </dw:transform-message>
+                <mongo:save-document config-ref="Mongo_DB__Connection_String" collection="images" doc:name="Mongo DB"/>
+                <mongo:find-documents config-ref="Mongo_DB__Connection_String" collection="users" query-ref="#[flowVars.notifies]" returnId="false" doc:name="Mongo DB"/>
+                <dw:transform-message doc:name="Transform Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+payload]]></dw:set-payload>
+                </dw:transform-message>
+            </when>
+            <otherwise>
+                <dw:transform-message doc:name="Transform Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	"new": false,
+	"campus": flowVars.origin.campus 
+}]]></dw:set-payload>
+                </dw:transform-message>
+            </otherwise>
+        </choice>
+    </flow>
+</mule>
